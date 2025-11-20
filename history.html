@@ -30,6 +30,22 @@
     <button id="jumpBtn">跳转</button>
   </div>
 
+  <!-- 详情容器：带 ?id=BN_xx 时只展示这一条 -->
+  <div id="detail" style="display:none; margin-top: 16px;">
+    <div style="margin-bottom: 8px; font-size: 14px;">
+      <a id="backLink" href="./history.html">← 返回列表</a>
+    </div>
+    <div id="detail-id-line" style="font-size: 13px; color: #666;"></div>
+    <h2 id="detail-title" style="margin: 8px 0;"></h2>
+    <div id="detail-meta" style="font-size: 13px; color: #555; margin-bottom: 12px;"></div>
+    <h3 style="margin: 8px 0 4px;">正文</h3>
+    <pre id="detail-body" style="white-space: pre-wrap; background: #fff; padding: 12px; border-radius: 4px; border: 1px solid #eee; font-size: 14px;"></pre>
+    <div id="detail-disclaimer-wrap" style="margin-top: 12px; display: none;">
+      <h3 style="margin: 8px 0 4px;">免责声明</h3>
+      <pre id="detail-disclaimer" style="white-space: pre-wrap; background: #fff; padding: 12px; border-radius: 4px; border: 1px solid #eee; font-size: 13px; color: #555;"></pre>
+    </div>
+  </div>
+
   <table>
     <thead>
       <tr>
@@ -57,18 +73,83 @@
       return null;
     }
 
-    function scrollToId(id) {
-      const row = document.querySelector(`[data-ann-id="${id}"]`);
-      if (row) {
-        row.classList.add('highlight');
-        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    function idToIndex(id) {
+      if (!id) return -1;
+      const upper = String(id).toUpperCase();
+      const match = /^BN_(\d+)$/.exec(upper);
+      if (!match) return -1;
+      const num = parseInt(match[1], 10);
+      if (!num || num < 1) return -1;
+      return num - 1;
+    }
+
+    function renderDetail(item, id, totalCount) {
+      const detail = document.getElementById('detail');
+      const controls = document.querySelector('.controls');
+      const table = document.querySelector('table');
+      const status = document.getElementById('status');
+
+      const ann = item.data || {};
+      const publishTime = ann.publishDate ? new Date(ann.publishDate).toLocaleString() : '';
+      const catalogName = ann.catalogName || '';
+
+      const idLine = document.getElementById('detail-id-line');
+      const titleEl = document.getElementById('detail-title');
+      const metaEl = document.getElementById('detail-meta');
+      const bodyEl = document.getElementById('detail-body');
+      const disWrap = document.getElementById('detail-disclaimer-wrap');
+      const disPre = document.getElementById('detail-disclaimer');
+
+      if (idLine) {
+        idLine.textContent = 'ID：' + id + '（共 ' + totalCount + ' 条）';
+      }
+      if (titleEl) {
+        titleEl.textContent = ann.title || '';
+      }
+
+      let metaText = '';
+      if (publishTime) metaText += '发布时间：' + publishTime;
+      if (catalogName) {
+        metaText += (metaText ? ' ｜ ' : '') + '分类：' + catalogName;
+      }
+      if (metaEl) {
+        metaEl.textContent = metaText;
+      }
+
+      if (bodyEl) {
+        bodyEl.textContent = ann.body || '';
+      }
+
+      const disclaimer = ann.disclaimer || '';
+      if (disWrap && disPre) {
+        if (disclaimer && disclaimer.trim()) {
+          disPre.textContent = disclaimer;
+          disWrap.style.display = 'block';
+        } else {
+          disWrap.style.display = 'none';
+        }
+      }
+
+      const backLink = document.getElementById('backLink');
+      if (backLink) {
+        backLink.href = './history.html';
+      }
+
+      if (controls) controls.style.display = 'none';
+      if (table) table.style.display = 'none';
+      if (detail) detail.style.display = 'block';
+
+      if (status) {
+        status.textContent = '正在查看 ' + id + ' 的详情。';
       }
     }
 
     async function loadData() {
       const status = document.getElementById('status');
       const tbody = document.getElementById('list');
-      status.textContent = '正在从 logs/announcements_history.json 加载...';
+      if (status) {
+        status.textContent = '正在从 logs/announcements_history.json 加载...';
+      }
 
       try {
         const res = await fetch('./logs/announcements_history.json');
@@ -76,11 +157,27 @@
         const data = await res.json();
 
         if (!Array.isArray(data) || data.length === 0) {
-          status.textContent = '暂无数据。请先运行监控程序生成 announcements_history.json。';
+          if (status) {
+            status.textContent = '暂无数据。请先运行监控程序生成 announcements_history.json。';
+          }
           return;
         }
 
-        tbody.innerHTML = '';
+        const targetIdRaw = getQueryId();
+        if (targetIdRaw) {
+          const index = idToIndex(targetIdRaw);
+          if (index >= 0 && index < data.length) {
+            const normalizedId = formatId(index);
+            renderDetail(data[index], normalizedId, data.length);
+            return;
+          } else if (status) {
+            status.textContent = '未找到 ID 为 ' + targetIdRaw + ' 的公告，已展示全部列表。';
+          }
+        }
+
+        if (tbody) {
+          tbody.innerHTML = '';
+        }
 
         data.forEach((item, index) => {
           const id = formatId(index);
@@ -99,29 +196,36 @@
             <td class="body-preview" title="${(ann.body || '').replace(/"/g, '&quot;')}">${bodyPreview}</td>
           `;
 
-          tbody.appendChild(tr);
+          if (tbody) {
+            tbody.appendChild(tr);
+          }
         });
 
-        status.textContent = `共加载 ${data.length} 条公告。ID 从 BN_01 开始自增。`;
-
-        const targetId = getQueryId();
-        if (targetId) {
-          scrollToId(targetId);
+        if (status) {
+          status.textContent = '共加载 ' + data.length + ' 条公告。ID 从 BN_01 开始自增。';
         }
       } catch (err) {
         console.error(err);
-        status.textContent = '加载失败：' + err.message + '。请确认在同一目录通过 HTTP 方式访问，并且存在 logs/announcements_history.json。';
+        if (status) {
+          status.textContent = '加载失败：' + err.message + '。请确认在同一目录通过 HTTP 方式访问，并且存在 logs/announcements_history.json。';
+        }
       }
     }
 
     document.getElementById('jumpBtn').addEventListener('click', () => {
-      const val = document.getElementById('jumpInput').value.trim();
-      if (val) {
-        const id = val.toUpperCase();
-        const url = new URL(window.location.href);
-        url.searchParams.set('id', id);
-        window.location.href = url.toString();
+      const input = document.getElementById('jumpInput');
+      if (!input) return;
+      const val = input.value.trim();
+      if (!val) return;
+      const index = idToIndex(val);
+      if (index < 0) {
+        alert('ID 格式不正确，请输入类似 BN_01');
+        return;
       }
+      const id = formatId(index);
+      const url = new URL(window.location.href);
+      url.searchParams.set('id', id);
+      window.location.href = url.toString();
     });
 
     window.addEventListener('DOMContentLoaded', loadData);
